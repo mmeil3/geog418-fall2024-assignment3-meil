@@ -1,4 +1,5 @@
-# geog418-fall2024-assignment3-meil
+# Geog 418 Fall 2024 - Spatial Autocorrelation Tutorial
+
 
 Introduction
 Spatial Autocorrelation?
