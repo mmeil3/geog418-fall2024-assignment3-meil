@@ -1,7 +1,7 @@
 # Geog 418 Fall 2024 - Spatial Autocorrelation Tutorial
 
 
-Introduction
+# Introduction
 
 Concepts such as point pattern analysis that are achieved through nearest neighbour analysis, k-function, and quadrat analysis are useful for quantifying and visualising patterns.  Such as, if they are clustered, dispersed, or random. However, it is also valuable to determine if attributes of these locations are random or not. This is called spatial autocorrelation, a spatial analysis tool that measures the correlation of a variable with itself across space.
 
@@ -17,7 +17,7 @@ In order to map census Data in R, we need to understand how to open, format, and
 
 First, we need to install and load required libraries. Installing libraries only needs to be done once, while you need to ensure you load your libraries at the beginning of each session. Libraries in R help us with data processing and visualisation, such as map making or plotting. Each library has a set of functions and you must install and load them to use them. 
 
-# Install packages if not already installed:
+Install packages if not already installed:
 
 install.packages("knitr")
 install.packages("rgdal")
@@ -27,7 +27,7 @@ install.packages("raster")
 install.packages("e1071")
 install.packages("moments")
 
-# Load in libraries:
+Load in libraries:
 
 library("sp")
 library("raster")
