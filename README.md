@@ -17,6 +17,34 @@ In order to map census Data in R, we need to understand how to open, format, and
 
 First, we need to install and load required libraries. Installing libraries only needs to be done once, while you need to ensure you load your libraries at the beginning of each session. Libraries in R help us with data processing and visualisation, such as map making or plotting. Each library has a set of functions and you must install and load them to use them. 
 
+# Install packages if not already installed:
+
+install.packages("knitr")
+install.packages("rgdal")
+install.packages("tmap")
+install.packages("spdep")
+install.packages("raster")
+install.packages("e1071")
+install.packages("moments")
+
+# Load in libraries:
+
+library("sp")
+library("raster")
+library("tmap")
+library("knitr")
+library("sf")
+library("ggplot2")
+library("plyr")
+library("dplyr")
+library("st")
+library("spatstat")
+library("e1071")
+library("moments")
+
+To start, you will want to read the shapefile for the census boundaries into ‘R’ as a st dataframe and the census data into a dataframe. 
+After we load and install our libraries, we can open and format our census data to the correct data type and projections. We will have to set a working directory, which tells R where to look for, and save files. This helps prevent errors with file paths and makes it easier to view outputs.
+
 
 Spatial Autocorrelation?
 Working Library?
