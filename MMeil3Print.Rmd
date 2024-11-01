@@ -1,0 +1,516 @@
+---
+title: 'Spatial Autocorrelation Tutorial: GEOG 418'
+author: "Michaela Meil"
+date: "2024-11-01"
+output: pdf_document
+---
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Set global options
+knitr::opts_chunk$set(echo = FALSE)  # If you want to hide all code
+```
+
+## Introduction
+
+Concepts such as point pattern analysis that are achieved through nearest neighbour analysis, k-function, and quadrat analysis are useful for quantifying and visualising patterns.  Such as, if they are clustered, dispersed, or random. However, it is also valuable to determine if attributes of these locations are random or not. This is called spatial autocorrelation, a spatial analysis tool that measures the correlation of a variable with itself across space.
+
+Spatial pattern attributes arethe basis of spatial analysis, and are examined by determining if locations that are closer together have similar attributes. It has been argued that the integration of analytical and visual methods can improve the effectiveness of spatial analysis as a decision support tool for policy and management (Guo, 2007). These concepts build off of Tobler’s Law, determining that everything is related to everything else, but closer things are more similar than things further away  (Tobler, 1970, p. 236.)  When Tobler’s law is true, we see spatial patterns where closer things are more similar, created a positive spatial autocorrelation, or clustered pattern. When Tobler’s Law is false, it is referred to as negative spatial autocorrelated, or a dispoersed pattern. 
+
+Spatial autocorrelation measures based on the Moran’s I (Getis 2008) are commonly used to test clustering tendency of medical data, including analysis in multivariate specifications (Lin and Zhang 2007). A significant and effective application of spatial autocorrelation is examining census. The census is an important dataset that provides a plethora of knowledge to inform policy decision, research, healthcare, and many more essential services. In Canada, the census is collected every five years, where it was last collected in 2021 (Statistics Canada, 2021).
+
+We can use spatial autocorrelation to determine if a variable is more positively,  or negatively spatially autocorrelated. This is done through Moran’s I statistic, which determines whether you want to see how similar or different you are from your neighbours. To do this, you must also define your neighbourhoods, which can be done using several standards (k-Nearest, Inverse Distance). In this exercise, we use Rook Weights (Neighbours in 4 adjacent locations) and Queen Weights (Neighbours are surrounding point).
+
+While we employ a number of statistical tests to perform our spatial autcorrelation analysis, we use the variables of median total income and french knowledge to determine whether degree these objects or activities at some place on the earth's surface are similar to other objects or activities located nearby.  We extract data from Saskatoon, Saskatchewan to perform this analysis. 
+
+In order to map census Data in R, we need to understand how to open, format, and map census data. As mentioned above, we are going to me using median total income and french knowledge variables from the census to visualize are data. 
+
+First, we need to install and load required libraries. Installing libraries only needs to be done once, while you need to ensure you load your libraries at the beginning of each session. Libraries in R help us with data processing and visualisation, such as map making or plotting. Each library has a set of functions and you must install and load them to use them. 
+
+
+
+```{r Libraries, echo=TRUE, eval=TRUE, message=FALSE, warning=FALSE}
+
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+
+
+#Install packages if not already installed:
+
+install.packages("knitr")
+install.packages("rgdal")
+install.packages("tmap")
+install.packages("spdep")
+install.packages("raster")
+install.packages("e1071")
+install.packages("moments")
+
+#Load in libraries:
+
+library("sp")
+library("raster")
+library("tmap")
+library("knitr")
+library("sf")
+library("ggplot2")
+library("plyr")
+library("dplyr")
+library("st")
+library("spatstat")
+library("e1071")
+library("moments")
+
+```
+
+
+
+To start, you will want to read the shapefile for the census boundaries into ‘R’ as a st dataframe and the census data into a dataframe. 
+After we load and install our libraries, we can open and format our census data to the correct data type and projections. We will have to set a working directory, which tells R where to look for, and save files. This helps prevent errors with file paths and makes it easier to view outputs. 
+
+
+```{r Read in data, echo=TRUE, eval=TRUE, warning=FALSE}
+
+#Set Working Directory
+
+dir <- "C:/Users/micha/Documents/GEOG 418"
+setwd(dir)
+
+#From the working dir read in the csv
+csv <- read.csv("ucgsJQnBVLvP_data.csv") 
+
+#Data source is the working dir (where the layer is), layer is the name of the file (without .shp)
+shp <- st_read("C:/Users/micha/Documents/GEOG 418")
+
+# Check layers in a shapefile 
+st_layers("C:/Users/micha/Documents/GEOG 418")
+
+# Read layer 3
+shp <- st_read("C:/Users/micha/Documents/GEOG 418/lda_000a16a_e.shp")
+
+
+```
+
+Next, we want to clean up our data and make it easier to use. First we will create a vector of the column names so we understand what columns refer to what data. Then, we will remove any unwanted rows and merge the result with our spatial polygon data frame, and finally, we will subset to only the city of interest, for this analysis 'Saskatoon'. The last step is to turn any absolute count data into a rate for mapping and analysis.
+
+
+```{r Clean data, echo=TRUE, eval=TRUE, warning=FALSE}
+#New column names
+cols <- c("GEO UID", "Province code", "Province name", "CD code",
+          "CD name", "DA name", "Population", "Land area", 
+          "Median total income", "Income Sample Size", "French Knowledge", 
+          "Language Sample Size")
+
+#Apply those names to dataframe
+colnames(csv) <- cols
+
+#Add column to count number of ID characters
+csv$len <- nchar(csv$`GEO UID`)
+
+#Remove IDs with less than 8 numbers
+csv_clean <- subset(csv, csv$len == 8)
+
+#Merge spatial and and aspatial data
+shp$DAUID <- as.character(shp$DAUID)
+csv_clean$`GEO UID` <- as.character(csv_clean$`GEO UID`)
+
+census_DAs <- merge(shp, csv_clean, 
+                    by.x = "DAUID",
+                    by.y = "GEO UID",
+                    all.x = TRUE)
+
+#Subset for Saskatoon
+
+Municp <- subset(census_DAs, census_DAs$CMANAME == "Saskatoon")
+
+#Convert to rate
+Municp$PercFrench <- (Municp$`French Knowledge`/Municp$`Language Sample Size`)*100
+Municp$MedTotalIncome <- (Municp$`Median total income`/Municp$`Income Sample Size`)*100
+
+
+```
+
+Before we can start to analyze our data, we need to be sure that the data we are looking at is relevant. Often, missing data in the form of NA or 0 values can change the results of an analysis. To make sure that the polygons we are looking at actually contain values for our variables of interest. To do this we can remove any polygon that contains an NA value for either median total income or knowledge of French.
+
+```{r NA Remove, echo=TRUE, eval=TRUE, warning=FALSE}
+#Remove Income NA
+Income_noNA <- Municp[which(!is.na(Municp$MedTotalIncome)),]
+
+#Remove French NA
+French_noNA <- Municp[which(!is.na(Municp$PercFrench)),]
+```
+
+Next, we will take a closer look at the two variables we are interested in: Median total income and Percentage of respondents with French language knowledge. We will look at some descriptive stats and do a final check for NA values in the data.
+
+```{r DescriptiveStats, echo=TRUE, eval=TRUE, warning=FALSE}
+#Calculate descriptive stats for Income
+meanIncome <- mean(Income_noNA$`Median total income`, na.rm = TRUE)
+stdevIncome <- sd(Income_noNA$`Median total income`, na.rm = TRUE)
+skewIncome <- skewness(Income_noNA$`Median total income`, na.rm = TRUE)
+
+#Calculate descriptive stats for French
+meanFrench <- mean(French_noNA$`French Knowledge`, na.rm = TRUE)
+stdevFrench <- sd(French_noNA$`French Knowledge`, na.rm = TRUE)
+skewFrench <- skewness(French_noNA$`French Knowledge`, na.rm = TRUE)
+
+#Create dataframe for display in table
+data <- data.frame(Variable = c("Income", "French Language"),
+                   Mean = c(round(meanIncome,2), round(meanFrench,2)),
+                   StandardDeviation = c(round(stdevIncome,2), round(stdevFrench,2)),
+                   Skewness = c(round(skewIncome,2), round(skewFrench,2)))
+
+#Produce table
+kable(data, caption = paste0("Descriptive statistics for selected ", 2016, " census variables"))
+```
+
+The data has to be set to working directory, read, and mapped. We bring in our shapefile and .csv file to get our political boundaries and census data, respectively. We then prepare the data by making new column names, and removin ID’s fewer than 8 characters. We then merge the files together to make census_DAs, which was merged on a mutual identifier between the two files (DAUID and GEO UID). We then select our subset for Saskatoon, remove missing values,and use these variables to create two maps: Saskatoon census dissemination areas showing Median Total Income (left) and percentage of respondants with Knowledge of French (right).
+
+
+```{r StudyArea, echo=TRUE, eval=TRUE, warning=FALSE, fig.cap="Saskatoon census dissemination areas showing median total income (left) and percentage of respondants with knowledge of french (right)."}
+#Choose a pallete
+tmaptools::palette_explorer() #Tool for selecting pallettes
+
+#Map median Income
+map_Income <- tm_shape(Income_noNA) + 
+  tm_polygons(col = "Median total income", 
+              title = "Median total income", 
+              style = "jenks", 
+              palette = "PuBuGn", n = 6,
+              border.alpha = 0,
+              colorNA = "grey") +
+  tm_layout(legend.position = c("RIGHT", "TOP"))
+
+#Map French Knowledge
+map_French <- tm_shape(French_noNA) + 
+  tm_polygons(col = "PercFrench", 
+              title = "Percentage with \n French Knowledge", 
+              style = "jenks", 
+              palette = "RdPu", n = 6,
+              border.alpha = 0,
+              colorNA = "grey") +
+  tm_layout(legend.position = c("RIGHT", "TOP"))
+
+#Print maps side by side
+tmap_arrange(map_Income, map_French, ncol = 2, nrow = 1)
+```
+
+## Neighbourhood matrix
+
+A weighted neighbourhood matrix is a key part of spatial autocorrelation. This tool helps us understand how different or similar we are to our neighbours. Before we can understand how different or similar we are, we must define our neighbourhood first. There are four primary ways of completing this step for spatial analysis, as mentioned in the introduction: Rook Weights, Queen Weights, k-Nearest Neighbours,and  Inverse Distance Weighted (Earnest et al., 2007). 
+Rook Weights: Neighbours are in four adjacent locations
+Queen Weights: Neighbours are 8 points or cells surrounding centre
+K Nearest Neighbours: k is defined previously (ex. k=10)
+Inverse Distance Weighted: Weights nearby points higher, and points further away lower.
+Depending on what method you use, it will impact your results. For our analysis we chose Rook and Queen Weights due to their effectiveness to observe social patterns. Queen weights allows us to ensure we understand how interactions are not limited specifically to space, rather we can gain an understanding on connections through social services, and lanuages.
+
+
+The code to create a list of neighbours in R is very simple thanks to the poly2nb() function in the ‘spdep’ package. If we want to change from default queen weighting to rook weighting in our selection, we simply change the ‘queen = TRUE’ to ‘queen = FALSE’.
+
+```{r Neighbours, echo=TRUE, eval=TRUE, warning=FALSE}
+
+#add libraries back in to create sf objects rather than sp
+library(sf)
+library(spdep)
+library(tmap)
+
+# Set CRS for the shapefile
+st_crs(shp) <- 5070
+
+# Set the same CRS for Income_noNA
+st_crs(Income_noNA) <- st_crs(shp)
+
+# Confirm the CRS for both datasets
+print(st_crs(Income_noNA))
+
+
+# Income Neighbours - Queens weight
+Income.nb <- poly2nb(Income_noNA)
+Income.net <- nb2lines(Income.nb, coords = st_coordinates(Income_noNA))
+# Convert Income.net to sf
+Income.net <- st_as_sf(Income.net)
+# Set CRS for Income.net
+st_crs(Income.net) <- st_crs(Income_noNA)
+
+# Income Neighbours - Rooks weight
+Income.nb2 <- poly2nb(Income_noNA, queen = FALSE)
+Income.net2 <- nb2lines(Income.nb2, coords = st_coordinates(Income_noNA))
+# Convert Income.net2 to sf
+Income.net2 <- st_as_sf(Income.net2)
+# Set CRS for Income.net2
+st_crs(Income.net2) <- st_crs(Income_noNA)
+
+# French Neighbours - Queens weight
+French.nb <- poly2nb(French_noNA)
+French.net <- nb2lines(French.nb, coords = st_coordinates(French_noNA))
+# Convert French.net to sf
+French.net <- st_as_sf(French.net)
+# Set CRS for French.net
+st_crs(French.net) <- st_crs(French_noNA)
+
+# French Neighbours - Rooks weight
+French.nb2 <- poly2nb(French_noNA, queen = FALSE)
+French.net2 <- nb2lines(French.nb2, coords = st_coordinates(French_noNA))
+# Convert French.net2 to sf
+French.net2 <- st_as_sf(French.net2)
+
+# Set CRS for French.net2
+st_crs(French.net2) <- st_crs(French_noNA)
+
+library(sf)
+
+# Transform the French datasets to the same CRS
+French_noNA <- st_transform(French_noNA, crs = 5070)
+French.net <- st_transform(French.net, crs = 5070)
+French.net2 <- st_transform(French.net2, crs = 5070)
+
+```
+
+The second map is created by important our dataset that was cleaned from empty values (NAs), the values from our queen (Income/French.net), and rook (Income/French.Net2) values in R. These values are combined to produce 3 maps: total income neighbours queens weight (left) , rooks weight (middle), and the combination of the two (right). The results directly overlay each other, making it difficult to infer how income varies over space in Saskatoon.
+
+```{r Neighboursmap, echo=TRUE, eval=TRUE, warning=FALSE, fig.cap="Saskatoon census dissemination areas showing median total income neighbours queens weight (left)  rooks weight (middle) and the combination of the two (right)."}
+
+#Make queens map
+IncomeQueen <- tm_shape(Income_noNA) + tm_borders(col='lightgrey') + 
+  tm_shape(Income.net) + tm_lines(col='green')
+
+#Make rooks map
+IncomeRook <- tm_shape(Income_noNA) + tm_borders(col='lightgrey') + 
+  tm_shape(Income.net2) + tm_lines(col='blue', lwd = 2)
+
+#Make combined map
+IncomeBoth <- tm_shape(Income_noNA) + tm_borders(col='lightgrey') + 
+  tm_shape(Income.net) + tm_lines(col='green', lwd = 2) +
+  tm_shape(Income.net2) + tm_lines(col='blue', lwd = 2)
+
+#Print maps in a three pane figure
+tmap_arrange(IncomeQueen, IncomeRook, IncomeBoth, ncol = 3, nrow = 1)
+
+
+```
+
+Weights are defined by “style” (ie. type), and can include “B”, “W”, and “C”. The B weights matrix is the most basic of the three, as it employs a binary weighting scheme, whereby each neighbour is given a weight of 1, and all other polygons are given a weight of 0 (see figures above). A W weights matrix employs a row standardized weighting scheme, with each neighbour given equal weights that sum to 1 [11]. Comparatively, a C weights matrix is a globally standardized method of weighting, with all neighbours given equal weight across the entire study area [13].
+
+Creating a weights matrix in R uses the “nb2listw” function from the “spdep” library. We can apply this function to the vri.nb variable created above, as it contains all of the neighbour links to which we want to assign weights. Additionally, if there are any polygons in our file with zero neighbour links, we still want the program to run. Therefore, we define “zero.policy” as equal to “TRUE”, which assigns weights vectors of zero length for regions with no neighbours [13]. Subsequently, we can print off our list of weights matrices (“print.listw”) in order to assess the distribution of weights for each observation (i) and its neighbours (j). The example of code below is using a weights matrix of type W. You can read more about the different styles of spatial weighting [here](https://r-spatial.github.io/spdep/reference/nb2listw.html).
+
+
+```{r Final weights, echo=TRUE, eval=TRUE, warning=FALSE}
+#Create Income weights matrix
+Income.lw <- nb2listw(Income.nb, zero.policy = TRUE, style = "W")
+
+#Create French weights matrix
+French.lw <- nb2listw(French.nb, zero.policy = TRUE, style = "W")
+
+head(Income.lw[["weights"]])[c(1:3)]
+
+```
+
+
+## Global Moran’s I
+
+Now that we have determined how to choose and weight our neighbours, we can calculate the Global Moran’s I statistic. This method of testing for spatial autocorrelation looks across the entire study area for every location simultaneously [14]. The equation for this statistic is
+
+$$
+I = \frac{\sum_{i=1}^n\sum_{j=1}^nW_{i,j}(x_i - \bar{x})(x_j - \bar{x})}{(\sum_{i=1}^n\sum_{j=1}^nW_{i,j})\sum_{i=1}^n(x_i - \bar{x})^2}
+$$
+
+Here, if $x$ is the variable being assessed, $x_i$ is the variable value at a point of interest (i) and $x_j$ represents a neighbour to $x_i$ (here determined by the queen weighting scheme). The spatial weighting applied to the weighting matrix $W_{i,j}$ is multiplied by both the differences of $x_i$ and the mean value of variable $x$, and $x_j$ and the mean value of variable $x$.
+
+The denominator in this case is used to standardize our values, and therefore relatively high values of I correspond with positive spatial autocorrelation, and relatively low values of I correspond with negative spatial autocorrelation. Remember that the global Moran’s I statistic provides an indication of how spatially autocorrelated our data is over the entire dataset, thus representing a spatial pattern at the global scale [15].
+
+
+```{r Global Morans I, echo=TRUE, eval=TRUE, warning=FALSE}
+#Calculate Global Moran's I for Income
+miIncome <- moran.test(Income_noNA$`Median total income`, Income.lw, zero.policy = TRUE)
+
+#Extract Global Moran's I results for Income
+mIIncome <- miIncome$estimate[[1]]
+eIIncome <- miIncome$estimate[[2]]
+varIncome <- miIncome$estimate[[3]]
+
+#Calculate Global Moran's I for French
+miFrench <- moran.test(French_noNA$PercFrench, French.lw, zero.policy = TRUE)
+
+#Extract Global Moran's I results for French
+mIFrench <- miFrench$estimate[[1]]
+eIFrench <- miFrench$estimate[[2]]
+varFrench <- miFrench$estimate[[3]]
+```
+For Moran’s I, we received a value of 0.5199833 and 0.2522279 for Median Total Income and Percentage of French Knowledge respectively. Our first value indicates slight positive spatial autocorrelation, suggesting higher median incomes are likely to be clustered. However, our second value suggest weak positive spatial autocorrelation as it is just above 0.  This means that French knowledge can be located near each other, but not as significantly as income. 
+
+For Expected I, we receive a value of -0.0024331 for Median Total Income, and -0.0023529 for Percent of French Knowledge. Given the values are so close to 0, they are likely to be random or slightly dispersed. 
+
+For Variance, we receive a value of 0.0008838 and 0.0008702 for Median total income and Percent of French Knowledge, respectively. This means that observed values are close to the mean, and consistent spatial autocorrelation is occurring. 
+
+
+
+```{r Global Morans Range, echo=TRUE, eval=TRUE, warning=FALSE}
+#Function to calculate the range of global Moran's I
+moran.range <- function(lw) {
+  wmat <- listw2mat(lw)
+  return(range(eigen((wmat + t(wmat))/2)$values))
+}
+
+#Calculate the range for the Income variable
+range <- moran.range(Income.lw)
+minRange <- range[1]
+maxRange <- range[2]
+```
+
+However, we can still go a step further and figure out whether these patterns are statistically significant. To do so, we can use a Z-test. Here our null hypothesis is ?, and the alternate hypothesis is ?. Using an $\alpha$ value of 0.05, if our Z-score falls above or below 1.96, we can say ?. A value greater than +1.96 would imply ?, and a value less than -1.96 would imply ?.
+
+We can calculate a Z-test using the following code:
+
+```{r Global Morans ZScore, echo=TRUE, eval=TRUE, warning=FALSE}
+#Calculate z-test for Income
+zIncome <- (mIIncome - eIIncome) / (sqrt(varIncome))
+
+#Calculate z-test for French
+zFrench <- (mIFrench - eIFrench) / (sqrt(varFrench))
+```
+
+The Z score’s are able to confirm significant positive spatial autocorrelation. For Median Total Income, we have a value of 17.57 and 8.63 for percentage of French Knowledge. Both of these numbers are high enough to reject the null hypothesis. 
+
+## Local spatial autocorrelation
+
+While global spatial autocorrelation operates by comparing how similar every object is to its neighbours, sometimes we want something a little more specific. Local Moran’s I is used to measure and analyse local spatial autocorrelation (Flahaut et al, 2003).
+The calculation for Local Moran’s I has many of the same features as our global calculation, although arranged in a different way.
+
+$$
+I_i = \frac{x_i - \bar{x}}{S_i^2}\sum{_{j=1}^n}W_{i,j}(x_j - \bar{x})\space \space where \space \space S_i^2 = \frac{\sum_{i=1}^n (x_i - \bar{x})^2}{n-1} 
+$$
+
+Again, instead of typing out these calculations, we can use the localmoran() function to deal with all of the messy calculations for us, as long as we input our variable and weighting scheme.
+
+
+```{r Local Morans I, echo=TRUE, eval=TRUE, warning=FALSE}
+#Calculate LISA test for Income
+lisa.testIncome <- localmoran(Income_noNA$`Median total income`, Income.lw)
+
+#Extract LISA test results for Income
+Income_noNA$Ii <- lisa.testIncome[,1]
+Income_noNA$E.Ii<- lisa.testIncome[,2]
+Income_noNA$Var.Ii<- lisa.testIncome[,3]
+Income_noNA$Z.Ii<- lisa.testIncome[,4]
+Income_noNA$P<- lisa.testIncome[,5]
+
+#Calculate LISA test for Income
+lisa.testFrench <- localmoran(French_noNA$PercFrench, French.lw)
+
+#Extract LISA test results for Income
+French_noNA$Ii <- lisa.testFrench [,1]
+French_noNA$E.Ii<- lisa.testFrench [,2]
+French_noNA$Var.Ii<- lisa.testFrench [,3]
+French_noNA$Z.Ii<- lisa.testFrench [,4]
+French_noNA$P<- lisa.testFrench [,5]
+
+
+
+```
+
+
+Now going back to our basic mapping template we can visualize some of these results to understand what this test is doing.
+
+
+```{r MappingLocalMoransI, echo=TRUE, eval=TRUE, warning=FALSE, fig.cap="Saskatoon census dissemination areas showing LISA z-scores for median total income (left) and percentage of respondants with knowledge of french (right)."}
+# Check for NA values before mapping
+if (any(is.na(French_noNA$Z.Ii))) {
+  warning("NA values present in Z.Ii. Check your data.")
+}
+
+
+# Prepare breaks for Income map
+income_breaks <- na.omit(Income_noNA$Z.Ii)
+if (length(income_breaks) == 0) {
+  income_breaks <- c(-1.96, 0, 1.96) 
+} else {
+  income_breaks <- c(min(income_breaks), -1.96, 1.96, max(income_breaks))
+}
+
+#Map LISA z-scores for Income
+map_LISA_Income <- tm_shape(Income_noNA) +
+  tm_polygons(col = "Z.Ii",
+              title = "Local Moran's I Z-Scores",
+              style = "fixed",
+              border.alpha = 0.1,
+              midpoint = NA,
+              colorNA = NULL,
+              breaks = income_breaks,
+              palette = "-RdBu", n = 3)+
+  tm_compass(position=c("left", "top"))+
+  tm_scale_bar(position=c("left", "bottom"))+
+  tm_legend(position = c("right", "top"))
+
+# Prepare breaks for French map
+french_breaks <- na.omit(French_noNA$Z.Ii)
+if (length(french_breaks) == 0) {
+  french_breaks <- c(-1.96, 0, 1.96)  
+} else {
+  french_breaks <- c(min(french_breaks), -1.96, 1.96, max(french_breaks))
+}
+
+#Map LISA z-scores for French
+map_LISA_French <- tm_shape(French_noNA) +
+  tm_polygons(col = "Z.Ii",
+              title = "Local Moran's I Z-Scores",
+              style = "fixed",
+              border.alpha = 0.1,
+              midpoint = NA,
+              colorNA = NULL,
+              breaks = french_breaks,
+              palette = "-RdBu", n = 3)+
+  tm_compass(position=c("left", "top"))+
+  tm_scale_bar(position=c("left", "bottom"))+
+  tm_legend(position = c("right", "top"))
+
+#Plot maps in a 2 pane figure
+tmap_arrange(map_LISA_Income, map_LISA_French, ncol = 2, nrow = 1)
+```
+
+We are then able to map spatial patterns of income distribution and French language in Saskatoon. Both maps exhibit high z scores, identifying that higher income areas are significantly higher than their neighbours (clustered). In the case of french knowledge, a high percentage of residence of are clustered together. However, areas with low z scores, mostly on the 2nd map incidate areas with low cluster values, this incdiactes lower median income areas, and lower percentage of french knowledge. These results are useful for understanding community needs and services. 
+
+While these maps are great for visualizing where the data is and getting a rough idea of how many polygons are significantly positively or negatively spatially autocorrelated, it can be even more informative to graph these trends.
+
+```{r MoransIScatter, echo=TRUE, eval=TRUE, warning=FALSE, fig.cap= "Moran's I scatter plot for median total income."}
+#Create Moran's I scatter plot for Income
+moran.plot(Income_noNA$`Median total income`, Income.lw, zero.policy=TRUE, spChk=NULL, labels=NULL, xlab="Median Total Income ($)", 
+           ylab="Spatially Lagged Median Total Income ($)", quiet=NULL)
+```
+
+
+
+```{r MoransIScatter2, echo=TRUE, eval=TRUE, warning=FALSE, fig.cap= "Moran's I scatter plot for percentage of respondants with knowledge of french."}
+#Create Moran's I scatter plot for French
+moran.plot(French_noNA$PercFrench, French.lw, zero.policy=TRUE, spChk=NULL, labels=NULL, xlab="Respondants with knowledge of French (%)", 
+           ylab="Spatially Lagged knowledge of French (%)", quiet=NULL)
+```
+
+
+Both plots for Local Moran’s Scatter Plots have a positive slope in the regression line. This suggests significant positive spatial autocorrelation. However, the Percentage of French Knowledge is significantly more dispersersed, which is also demonstrated in the previous map we made. 
+
+
+## Summary
+
+In all, spatial autocorrelation is a powerful analysis that provides information about a spatially distributed phenomenon that is not available in any other form of statistical analysis, and which can be vital for correct interpretation (MF Goodchild, 19…). The census is a powerful application of this information, allowing us to make meaningful decisions about our community resources.
+
+The spatial autocorrelation of Saskatchewan's Median Total Income and Percentage of French Knowledge is positively spatially autocorrelated. To confirm this, we performed numerous spatial analyses and data visualizations. We used a neighborhood matrix, a weighted neighborhood matrix, Global and Local Moran’s I, and Z-tests to ensure the accuracy of our findings. Throughout this process, we also created three maps: one showing Saskatoon census dissemination areas with median total income (left) and percentage of respondents with knowledge of French (right), one showing median total income with queen weights (left), rook weights (middle), and the combination of the two (right), and another showing Saskatoon census dissemination areas with LISA z-scores for median total income (left) and percentage of respondents with knowledge of French (right). Ultimately, our final Z-scores were 17.57 for Median Total Income and 8.63 for the Percentage of French Knowledge. Both of these numbers are high enough to reject the null hypothesis. In terms of our regression line, there was a positive slope, suggesting positive spatial autocorrelation. It is important to note that the Percentage of French Knowledge was less positively correlated than Median Total Income.
+
+In the future, including more variables would be an effective way to understand the range of socioeconomic factors affecting spatial patterns. In addition to using more variables, utilizing previous census data would be an effective way to see how spatial patterns have changed over time, especially given how fast our communities are growing in Canada. Further analysis would enhance policy and resource decisions based on census data
+
+## References
+
+Earnest, A., Morgan, G., Mengersen, K., et al. (2007). Evaluating the effect of neighbourhood weight matrices on smoothing properties of Conditional Autoregressive (CAR) models. *International Journal of Health Geographics, 6*(54). https://doi.org/10.1186/1476-072X-6-54
+
+Flahaut, B., Mouchart, M., San Martin, E., & Thomas, I. (2003). The local spatial autocorrelation and the kernel method for identifying black zones: A comparative approach. *Accident Analysis & Prevention, 35*(6), 991-1004. https://doi.org/10.1016/S0001-4575(02)00107-0
+
+Getis, A. (2008). A history of the concept of spatial autocorrelation: A geographer's perspective. *Geographical Analysis, 40*(3), 297-309.
+
+Goodchild, M. F. (1986). *Spatial autocorrelation*. Geo Books.
+
+Guo, D. (2007). Visual analytics of spatial interaction patterns for pandemic decision support. *International Journal of Geographical Information Science, 21*(8), 859–877.
+
+Lin, G., & Zhang, T. (2007). Loglinear residual tests of Moran’s I autocorrelation and their applications to Kentucky breast cancer data. *Geographical Analysis, 39*, 293–310.
+
+Statistics Canada. (2023). Canadian statistics, Census 2021 Data. https://www150.statcan.gc.ca/n1/en/type/data?portlet_levels=98P%2C98P10
+
+Tobler, W. R. (1970). A computer movie simulating urban growth in the Detroit region. *Economic Geography, 46*, 234-240.
+
+
+
